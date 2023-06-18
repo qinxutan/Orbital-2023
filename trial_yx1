@@ -29,53 +29,20 @@ def show_options(chat_id):
 def handle_option(message):
     option = message.text
     if option == 'Food':
-        bot.register_next_step_handler(message, show_food_options)
+        show_food_options(message.chat.id)
     elif option == 'Transport':
-        bot.register_next_step_handler(message, show_transport_options)
-
-
-# If user chooses Transport...
-# Bot will recommend journeys with pickup and drop-off within 1km radius
-# Prompts user to input pickup and drop-off postal codes
-def show_transport_options(message):
-    bot.send_message(message, 'Input postal code of pick-up point:')
-    bot.register_next_step_handler(message, handle_pickup)
-
-
-@bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
-def handle_pickup(message):
-    process_pickup(message)
-    bot.reply_to(message, 'Pick-up confirmed: ' + message.text)
-    bot.send_message(message.chat.id, 'Input postal code of drop-off point:')
-    bot.register_next_step_handler(message, handle_dropoff)
-
-
-@bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
-def handle_dropoff(message):
-    process_dropoff(message)
-    bot.register_next_step_handler(message, process_dropoff)
-    bot.send_message(message.chat.id, 'Drop-off confirmed: ' + message.text)
-
-
-# register pickup location
-def process_pickup(message):
-    pass
-
-
-# register dropoff location
-def process_dropoff(message):
-    pass
+        show_transport_options(message.chat.id)
 
 
 # If user chooses Food...
 # User can choose to Start or Join an order
-def show_food_options(message):
+def show_food_options(chat_id):
     keyboard = types.ReplyKeyboardMarkup(one_time_keyboard=True)
     button1 = types.KeyboardButton('Start an order')
     button2 = types.KeyboardButton('Join an order')
     keyboard.add(button1, button2)
 
-    bot.send_message(message.chat.id, 'Food options:', reply_markup=keyboard)
+    bot.send_message(chat_id, 'Food options:', reply_markup=keyboard)
 
 
 # If user chooses to Start an order...
@@ -142,12 +109,44 @@ def show_closing_time_options(chat_id):
 # Handler for handling user input
 # yo idk how to write the lambda function for this method leh cos if leave it as True then it will reply to all messages
 # even if they r not choosing closing time....
-@bot.message_handler(func=lambda message: isinstance(message, datetime.time()))
+@bot.message_handler(func=lambda message: isinstance(message, datetime))
 def handle_closing(message):
     # Process the selected time
     selected_time = message.text
     # Do something with the selected time
     bot.reply_to(message, f"You have selected the closing time as: {selected_time}")
+
+
+# If user chooses Transport...
+# Bot will recommend journeys with pickup and drop-off within 1km radius
+# Prompts user to input pickup and drop-off postal codes
+def show_transport_options(chat_id):
+    bot.send_message(chat_id, 'Input postal code of pick-up point:')
+
+
+@bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
+def handle_pickup(message):
+    process_pickup(message)
+    bot.reply_to(message, 'Pick-up confirmed: ' + message.text)
+    bot.send_message(message.chat.id, 'Input postal code of drop-off point:')
+    bot.register_next_step_handler(message, handle_dropoff)
+
+
+@bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
+def handle_dropoff(message):
+    process_dropoff(message)
+    bot.register_next_step_handler(message, process_dropoff)
+    bot.send_message(message.chat.id, 'Drop-off confirmed: ' + message.text)
+
+
+# register pickup location
+def process_pickup(message):
+    pass
+
+
+# register dropoff location
+def process_dropoff(message):
+    pass
 
 
 @bot.message_handler(func=lambda msg: True)
