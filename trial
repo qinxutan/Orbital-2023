@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import geopy.distance
 import requests
 
-BOT_TOKEN = "6097745193:AAHC-Y2D8dGGmf0Z2_V6sLzkD2PSue8RECA"
+BOT_TOKEN = "YOUR_BOT_TOKEN"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # Store pickup points and their locations
@@ -155,14 +155,25 @@ def process_dropoff(message):
         bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
 
 # Calculate distance between two coordinates using geodesic distance
-def calculate_distance(coords1, coords2):
-    return geopy.distance.distance(coords1, coords2).km
+def calculate_distance(coord1, coord2):
+    return geopy.distance.geodesic(coord1, coord2).kilometers
 
-# Get coordinates from postal code using geocoding service
+# Placeholder function for getting coordinates based on postal code
 def get_coordinates(postal_code):
-    # Use a geocoding service to retrieve the coordinates based on the postal code
-    # ...
-    return coordinates
+    api_key = 'YOUR_GOOGLE_MAPS_API_KEY'
+    url = f'https://maps.googleapis.com/maps/api/geocode/json?address={postal_code}&key={api_key}'
+
+    response = requests.get(url)
+    data = response.json()
+
+    if data['status'] == 'OK':
+        results = data['results']
+        if len(results) > 0:
+            location = results[0]['geometry']['location']
+            lat = location['lat']
+            lng = location['lng']
+            return lat, lng
+    return None
 
 # Run the bot
 bot.polling()
