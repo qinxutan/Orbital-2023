@@ -2,17 +2,20 @@ import os
 import telebot
 from telebot import types
 from datetime import datetime, timedelta
+import geopy.distance
+import requests
 
 BOT_TOKEN = "6097745193:AAHC-Y2D8dGGmf0Z2_V6sLzkD2PSue8RECA"
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Store pickup points and their locations
+pickup_points = {}
 
 # Handle /start and /hello commands
 @bot.message_handler(commands=['start', 'hello'])
 def send_welcome(message):
     bot.reply_to(message, "Hi! How can I help you today?")
     show_options(message.chat.id)
-
 
 # User can choose Food or Transport
 def show_options(chat_id):
@@ -23,7 +26,6 @@ def show_options(chat_id):
 
     bot.send_message(chat_id, 'Please select an option:', reply_markup=keyboard)
 
-
 # Handle user's choice of Food or Transport
 @bot.message_handler(func=lambda message: message.text in ['Food', 'Transport'])
 def handle_option(message):
@@ -32,39 +34,6 @@ def handle_option(message):
         show_food_options(message.chat.id)
     elif option == 'Transport':
         show_transport_options(message.chat.id)
-
-
-# If user chooses Transport...
-# Bot will recommend journeys with pickup and drop-off within 1km radius
-# Prompts user to input pickup and drop-off postal codes
-def show_transport_options(chat_id):
-    bot.send_message(chat_id, 'Input postal code of pick-up point:')
-
-
-@bot.message_handler(func=lambda message: message.text.isdigit() and 829999 >= int(message.text) >= 10000)
-def handle_pickup(message):
-    process_pickup(message)
-    bot.reply_to(message, 'Pick-up confirmed: ' + message.text)
-    bot.send_message(message.chat.id, 'Input postal code of drop-off point:')
-    bot.register_next_step_handler(message, handle_dropoff)
-
-
-@bot.message_handler(func=lambda message: message.text.isdigit() and 829999 >= int(message.text) >= 10000)
-def handle_dropoff(message):
-    process_dropoff(message)
-    bot.reply_to(message, 'Drop-off confirmed: ' + message.text)
-    # Perform additional steps or actions after drop-off confirmation
-
-
-# register pickup location
-def process_pickup(message):
-    pass
-
-
-# register dropoff location
-def process_dropoff(message):
-    pass
-
 
 # If user chooses Food...
 # User can choose to Start or Join an order
@@ -75,7 +44,6 @@ def show_food_options(chat_id):
     keyboard.add(button1, button2)
 
     bot.send_message(chat_id, 'Food options:', reply_markup=keyboard)
-
 
 # If user chooses to Start an order...
 # Prompts user to send Grab group order link
@@ -94,10 +62,8 @@ def handle_food_option(message):
         # send user group order link of chosen order
         pass
 
-
 def show_nearby_orders(message):
     bot.send_message(message.chat.id, 'Here are the ongoing nearby orders: ')
-
 
 # Retrieves restaurant name, restaurant location, delivery fee, delivery time, closing time, postal code of order
 def process_group_order_link(message):
@@ -107,14 +73,12 @@ def process_group_order_link(message):
     bot.send_message(message.chat.id, 'When do you want to close your group order?')
     show_closing_time_options(message.chat.id)
 
-
 # round_time is a helper function for show_closing_time_options
 # helps to round up times to the nearest 10 min for readability
 def round_time(time):
     current_minute = time.minute
     to_add_minute = 10 - (current_minute % 10)
     return to_add_minute
-
 
 # allows users 4 choices of order closing times
 # rounds current time up to the nearest 10 min
@@ -137,19 +101,68 @@ def show_closing_time_options(chat_id):
     # Send the message with the keyboard
     bot.send_message(chat_id, 'Choose a closing time:', reply_markup=markup)
 
-
 # Handler for handling user input
-@bot.message_handler(func=lambda message: isinstance(message, types.Message) and message.text.isdigit())
+@bot.message_handler(func=lambda message: message.text.isdigit())
 def handle_closing(message):
     # Process the selected time
     selected_time = message.text
     # Do something with the selected time
     bot.reply_to(message, f"You have selected the closing time as: {selected_time}")
 
+# If user chooses Transport...
+# Bot will recommend journeys with pickup and drop-off within 1km radius
+# Prompts user to input pickup and drop-off postal codes
+def show_transport_options(chat_id):
+    bot.send_message(chat_id, 'Input postal code of pick-up point:')
 
-@bot.message_handler(func=lambda msg: True)
-def echo_all(message):
-    bot.reply_to(message, message.text)
+@bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
+def handle_pickup(message):
+    process_pickup(message)
+    bot.reply_to(message, 'Pick-up confirmed: ' + message.text)
+    bot.send_message(message.chat.id, 'Input postal code of drop-off point:')
+    bot.register_next_step_handler(message, handle_dropoff)
 
+@bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
+def handle_dropoff(message):
+    process_dropoff(message)
+    bot.register_next_step_handler(message, process_dropoff)
+    bot.send_message(message.chat.id, 'Drop-off confirmed: ' + message.text)
 
-bot.infinity_polling()
+# register pickup location
+def process_pickup(message):
+    postal_code = message.text
+    # Use a geocoding service to get the coordinates of the pickup point based on the postal code
+    coordinates = get_coordinates(postal_code)
+    if coordinates:
+        pickup_points[message.chat.id] = coordinates
+        bot.send_message(message.chat.id, 'Pickup point registered.')
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+
+# register dropoff location
+def process_dropoff(message):
+    postal_code = message.text
+    # Use a geocoding service to get the coordinates of the drop-off point based on the postal code
+    coordinates = get_coordinates(postal_code)
+    if coordinates:
+        pickup_point = pickup_points.get(message.chat.id)
+        if pickup_point:
+            distance = calculate_distance(pickup_point, coordinates)
+            bot.send_message(message.chat.id, f"Distance between pickup and drop-off: {distance:.2f} km")
+        else:
+            bot.send_message(message.chat.id, 'No pickup point registered. Please enter the pickup postal code first.')
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+
+# Calculate distance between two coordinates using geodesic distance
+def calculate_distance(coords1, coords2):
+    return geopy.distance.distance(coords1, coords2).km
+
+# Get coordinates from postal code using geocoding service
+def get_coordinates(postal_code):
+    # Use a geocoding service to retrieve the coordinates based on the postal code
+    # ...
+    return coordinates
+
+# Run the bot
+bot.polling()
