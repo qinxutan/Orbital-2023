@@ -7,7 +7,7 @@ import requests
 from datetime import datetime, timedelta
 
 BOT_TOKEN = "6097745193:AAHC-Y2D8dGGmf0Z2_V6sLzkD2PSue8RECA"
-GOOGLE_MAPS_API_KEY = "AIzaSyBdfnEiKhiAVwWyM-EWflBM6NN9wpsNT3Y"
+GOOGLE_MAPS_API_KEY = "GOOGLE API KEY"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
