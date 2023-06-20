@@ -7,7 +7,7 @@ import requests
 from datetime import datetime, timedelta
 
 BOT_TOKEN = "6097745193:AAHC-Y2D8dGGmf0Z2_V6sLzkD2PSue8RECA"
-GOOGLE_MAPS_API_KEY = "GOOGLE API KEY"
+GOOGLE_MAPS_API_KEY = "AIzaSyBdfnEiKhiAVwWyM-EWflBM6NN9wpsNT3Y"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -60,7 +60,6 @@ def handle_food_option(message):
         # prompt user to input postal code
         bot.send_message(message.chat.id, "Input your postal code and we'll look for nearby orders for you!")
         bot.register_next_step_handler(message, show_nearby_orders)
-        
 def show_nearby_orders(message):
     bot.send_message(message.chat.id, 'Here are the ongoing nearby orders: ')
 
@@ -115,38 +114,38 @@ def is_valid_time(value):
         return True
     except ValueError:
         return False
-
 # If user chooses Transport...
 # Bot will recommend journeys with pickup and drop-off within 1km radius
 # Prompts user to input pickup and drop-off postal codes
 def show_transport_options(chat_id):
-    bot.send_message(chat_id, 'Input postal code of pick-up point:')
+    msg = bot.send_message(chat_id, 'Input postal code of pick-up point:')
+    bot.register_next_step_handler(msg, handle_pickup)
 
-@bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
 def handle_pickup(message):
     process_pickup(message)
     bot.reply_to(message, 'Pick-up confirmed: ' + message.text)
     bot.send_message(message.chat.id, 'Input postal code of drop-off point:')
     bot.register_next_step_handler(message, handle_dropoff)
 
-@bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
 def handle_dropoff(message):
     process_dropoff(message)
     bot.register_next_step_handler(message, process_dropoff)
     bot.send_message(message.chat.id, 'Drop-off confirmed: ' + message.text)
+    # Check if pickup locations of two users are within 1km radius with the same destination
+    check_within_1km_radius(message.chat.id, message.text)
 
-# register pickup location
+# Register pickup location
 def process_pickup(message):
     postal_code = message.text
     # Use the Google Maps Geocoding API to get the coordinates of the pickup point based on the postal code
     coordinates = get_coordinates(postal_code)
     if coordinates:
-        pickup_points[message.chat.id] = coordinates
+        pickup_points[message.chat.id] = {'coordinates': coordinates, 'telegram_handle': message.chat.username}
         bot.send_message(message.chat.id, 'Pickup point registered.')
     else:
         bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
 
-# register dropoff location
+# Register dropoff location
 def process_dropoff(message):
     postal_code = message.text
     # Use the Google Maps Geocoding API to get the coordinates of the drop-off point based on the postal code
@@ -154,8 +153,11 @@ def process_dropoff(message):
     if coordinates:
         pickup_point = pickup_points.get(message.chat.id)
         if pickup_point:
-            distance = calculate_distance(pickup_point, coordinates)
+            pickup_coordinates = pickup_point['coordinates']
+            distance = calculate_distance(pickup_coordinates, coordinates)
             bot.send_message(message.chat.id, f"Distance between pickup and drop-off: {distance:.2f} km")
+            if distance <= 1.0:
+                check_and_send_telegram_handles(message.chat.id, pickup_coordinates, coordinates)
         else:
             bot.send_message(message.chat.id, 'No pickup point registered. Please enter the pickup postal code first.')
     else:
@@ -181,5 +183,28 @@ def get_coordinates(postal_code):
             return (lat, lng)
 
     return None
+
+# Check if pickup locations of two users are within 1km radius with the same destination
+def check_within_1km_radius(chat_id, dropoff_coordinates):
+    for user_id, pickup_point in pickup_points.items():
+        if user_id != chat_id:
+            pickup_coordinates = pickup_point['coordinates']
+            distance = calculate_distance(pickup_coordinates, dropoff_coordinates)
+            if distance <= 1.0:
+                user1_handle = pickup_point['telegram_handle']
+                user2_handle = pickup_points[chat_id]['telegram_handle']
+                bot.send_message(chat_id, f"You and {user1_handle} are within a 1km radius with the same destination!")
+                bot.send_message(user_id, f"You and {user2_handle} are within a 1km radius with the same destination!")
+
+# Check and send Telegram handles of users within 1km radius
+def check_and_send_telegram_handles(chat_id, pickup_coordinates, dropoff_coordinates):
+    for user_id, pickup_point in pickup_points.items():
+        if user_id != chat_id:
+            distance = calculate_distance(pickup_coordinates, pickup_point['coordinates'])
+            if distance <= 1.0:
+                user1_handle = pickup_point['telegram_handle']
+                user2_handle = pickup_points[chat_id]['telegram_handle']
+                bot.send_message(chat_id, f"You and {user1_handle} are within a 1km radius with the same destination!")
+                bot.send_message(user_id, f"You and {user2_handle} are within a 1km radius with the same destination!")
 
 bot.polling()
