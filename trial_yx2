@@ -1,0 +1,228 @@
+import os
+import telebot
+from telebot import types
+from datetime import datetime, timedelta
+import geopy.distance
+import requests
+from datetime import datetime, timedelta
+
+
+
+BOT_TOKEN = "6217965722:AAEW6DismZ6EdJDCjiNZqyh034J3fSm-sX0"
+GOOGLE_MAPS_API_KEY = "AIzaSyBdfnEiKhiAVwWyM-EWflBM6NN9wpsNT3Y"
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# Store pickup points and their locations
+pickup_points = {}
+
+
+# Handle /start and /hello commands
+@bot.message_handler(commands=['start', 'hello'])
+def send_welcome(message):
+    bot.reply_to(message, "Hi! How can I help you today?")
+    show_options(message.chat.id)
+
+
+# User can choose Food or Transport
+def show_options(chat_id):
+    keyboard = types.ReplyKeyboardMarkup(row_width=1)
+    button1 = types.KeyboardButton('Food')
+    button2 = types.KeyboardButton('Transport')
+    keyboard.add(button1, button2)
+
+    bot.send_message(chat_id, 'Please select an option:', reply_markup=keyboard)
+
+
+# Handle user's choice of Food or Transport
+@bot.message_handler(func=lambda message: message.text in ['Food', 'Transport'])
+def handle_option(message):
+    option = message.text
+    if option == 'Food':
+        show_food_options(message)
+    elif option == 'Transport':
+        show_transport_options(message)
+
+
+# If user chooses Food...
+# User can choose to Start or Join an order
+def show_food_options(message):
+    keyboard = types.ReplyKeyboardMarkup(one_time_keyboard=True)
+    button1 = types.KeyboardButton('Start an order')
+    button2 = types.KeyboardButton('Join an order')
+    keyboard.add(button1, button2)
+
+    bot.send_message(message.chat.id, 'Food options:', reply_markup=keyboard)
+
+
+# If user chooses to Start an order...
+# Prompts user to send Grab group order link
+@bot.message_handler(func=lambda message: message.text in ['Start an order', 'Join an order'])
+def handle_food_option(message):
+    option = message.text
+    if option == 'Start an order':
+        bot.send_message(message.chat.id, 'Send us your Group order link!')
+        bot.register_next_step_handler(message, process_group_order_link)
+    elif option == 'Join an order':
+        # prompt user to input postal code
+        bot.send_message(message.chat.id, "Input your postal code and we'll look for nearby orders for you!")
+        bot.register_next_step_handler(message, show_nearby_orders)
+
+
+def show_nearby_orders(message):
+    bot.send_message(message.chat.id, 'Here are the ongoing nearby orders: ')
+
+
+# Retrieves restaurant name, restaurant location, delivery fee, delivery time, closing time, postal code of order
+def process_group_order_link(message):
+    link = message.text
+    # Process the group order link and register store name, delivery fee, duration, delivery location
+    # ...
+    bot.send_message(message.chat.id, 'When do you want to close your group order?')
+    show_closing_time_options(message.chat.id)
+
+
+# round_time is a helper function for show_closing_time_options
+# helps to round up times to the nearest 10 min for readability
+def round_time(time):
+    current_minute = time.minute
+    to_add_minute = 10 - (current_minute % 10)
+    return to_add_minute
+
+
+# allows users 4 choices of order closing times
+# rounds current time up to the nearest 10 min
+# then, provides 4 timings in 15 min intervals from the rounded time
+def show_closing_time_options(chat_id):
+    # Get the current time
+    current_time = datetime.now()
+
+    # Create the reply markup
+    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
+
+    # Generate four buttons with 15-minute intervals rounded up to the nearest multiple of 5
+    for i in range(4):
+        button_time = current_time + timedelta(minutes=15 * i + round_time(current_time))
+        button_text = button_time.strftime('%H:%M')
+        button = types.KeyboardButton(button_text)
+        markup.add(button)
+
+    # Send the message with the keyboard
+    bot.send_message(chat_id, 'Choose a closing time:', reply_markup=markup)
+
+
+# Handler for handling user input
+@bot.message_handler(func=lambda message: is_valid_time(message.text))
+def handle_closing(message):
+    # Process the selected time
+    selected_time = message.text
+    # Do something with the selected time
+    bot.reply_to(message, f"You have selected the closing time as: {selected_time}")
+
+
+# Function to check if the value is a valid time in HH:MM format
+def is_valid_time(value):
+    try:
+        datetime.strptime(value, "%H:%M")
+        return True
+    except ValueError:
+        return False
+
+
+# If user chooses Transport...
+# Bot will recommend journeys with pickup and drop-off within 1km radius
+# Prompts user to input pickup and drop-off postal codes
+def show_transport_options(message):
+    bot.reply_to(message, 'Input postal code of pick-up point:')
+    bot.register_next_step_handler(message, handle_pickup)
+
+
+# @bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
+def handle_pickup(message):
+    pickup_code = message.text
+    # Use the Google Maps Geocoding API to get the coordinates of the pickup point based on the postal code
+    coordinates = get_coordinates(pickup_code)
+    if coordinates:
+        pickup_points[message.chat.id] = coordinates
+        bot.reply_to(message, 'Pick-up confirmed: ' + pickup_code)
+        bot.send_message(message.chat.id, 'Input postal code of drop-off point:')
+        bot.register_next_step_handler(message, handle_dropoff)
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+
+
+# @bot.message_handler(func=lambda message: 829999 >= int(message.text) >= 10000)
+def handle_dropoff(message):
+    dropoff_code = message.text
+    # Use the Google Maps Geocoding API to get the coordinates of the drop-off point based on the postal code
+    coordinates = get_coordinates(dropoff_code)
+    if coordinates:
+        pickup_point = pickup_points.get(message.chat.id)
+        if pickup_point:
+            distance = calculate_distance(pickup_point, coordinates)
+            bot.send_message(message.chat.id, 'Drop-off confirmed: ' + message.text)
+            bot.send_message(message.chat.id, f"Distance between pickup and drop-off: {distance:.2f} km")
+            bot.register_next_step_handler(message, transport_summary)
+        else:
+            bot.send_message(message.chat.id, 'No pickup point registered. Please enter the pickup postal code first.')
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+
+
+# register pickup location
+def process_pickup(message):
+    postal_code = message.text
+    # Use the Google Maps Geocoding API to get the coordinates of the pickup point based on the postal code
+    coordinates = get_coordinates(postal_code)
+    if coordinates:
+        pickup_points[message.chat.id] = coordinates
+        bot.send_message(message.chat.id, 'Pickup point registered.')
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+
+
+# register dropoff location
+def process_dropoff(message):
+    postal_code = message.text
+    # Use the Google Maps Geocoding API to get the coordinates of the drop-off point based on the postal code
+    coordinates = get_coordinates(postal_code)
+    if coordinates:
+        pickup_point = pickup_points.get(message.chat.id)
+        if pickup_point:
+            distance = calculate_distance(pickup_point, coordinates)
+            bot.send_message(message.chat.id, f"Distance between pickup and drop-off: {distance:.2f} km")
+        else:
+            bot.send_message(message.chat.id, 'No pickup point registered. Please enter the pickup postal code first.')
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+
+
+# Calculate distance between two coordinates using geodesic distance
+def calculate_distance(coord1, coord2):
+    return geopy.distance.geodesic(coord1, coord2).kilometers
+
+
+# Get coordinates based on postal code using Google Maps Geocoding API
+def get_coordinates(postal_code):
+    url = f'https://maps.googleapis.com/maps/api/geocode/json?address={postal_code}&key={GOOGLE_MAPS_API_KEY}'
+
+    response = requests.get(url)
+    data = response.json()
+
+    if data['status'] == 'OK':
+        results = data['results']
+        if len(results) > 0:
+            location = results[0]['geometry']['location']
+            lat = location['lat']
+            lng = location['lng']
+            return (lat, lng)
+
+    return None
+
+
+# Show summary of Transport trip created
+def transport_summary(message):
+    pass
+
+
+bot.polling()
