@@ -8,6 +8,12 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 
+# to do: 
+# incorporate database into transport
+# incorporate proximity checking
+# accomodate next-day closing times 
+
+
 # Connect to the SQLite database
 conn = sqlite3.connect('user_data.db', check_same_thread=False)
 cursor = conn.cursor()
