@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 # incorporate database into transport
 # incorporate proximity checking
 # accomodate next-day closing times 
+# check if all data is of valid format and prompt user to rekey if invalid (e.g. link, postal code)
 
 
 # Connect to the SQLite database
