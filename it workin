@@ -10,16 +10,6 @@ import validators
 from datetime import datetime, timedelta
 from telebot import types
 
-# to do :
-# implement user input format checks (i.e. valid postal code, valid link etc.)
-# hide Chat ID and ID of orders
-# implement cancel order or trip
-# include bot rules (i.e. max 1 food 1 transport, eveyrth ends by 2359) in /help and prompts to users
-# substitute all lists with SQL tables for data retention across code runs
-# other commands? e.g. /help for bot introduction, /cancelfood, /canceltransport, interesting commands
-# how to deploy bot to a server or hosting platform & necessary steps to ensure bot is always running and available.
-
-
 # Connect to the SQLite database
 conn = sqlite3.connect('user_data.db', check_same_thread=False)
 cursor = conn.cursor()
