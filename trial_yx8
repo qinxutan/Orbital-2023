@@ -1,3 +1,6 @@
+# UPDATES:
+# Food now only uses sql tables for data storage, so data wont be lost on subsequent code runs
+
 import geopy.distance
 import requests
 import sqlite3
