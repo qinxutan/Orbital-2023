@@ -239,7 +239,6 @@ def delete_incomplete_transport():
                    "pickup_code IS NULL OR "
                    "leader_name IS NULL OR "
                    "dropoff_code IS NULL OR "
-                   "dropoff_name IS NULL OR "
                    "entry_date IS NULL OR "
                    "delete_time IS NULL")
     conn.commit
