@@ -1,0 +1,245 @@
+Bot Description:
+Brief overview
+GrabShare Bot helps users look for other users to split cost on their Grab food orders and transport trips. Users can choose to start/join Grab group orders/transport trips to order or travel with others to save money on delivery and petrol.
+
+Bot Setup:
+How to set up and configure the Telegram bot.
+Start a chat with BotFather on Telegram.
+Use command /newbot and follow the instructions given by BotFather to get the bot token for the new bot.
+Change the value of BOT_TOKEN (line 34) to the bot token obtained.
+Run "python <location>\\<location>\\...\\grabshare_bot\\grabshare_bot.py" in Terminal.
+
+
+Usage:
+
+Command /help will prompt the bot to send a message with an introduction and all available commands.
+
+
+
+Command /cancelfood allows users to delete their ongoing food order, if there is one. If not, the bot replies with “You do not have any ongoing food orders at the moment. Start an order using /start!”
+
+Command /canceltransport allows users to delete their ongoing transport trip, if there is one. If not, the bot replies with “You do not have any ongoing transport trips at the moment. Start an order using /start!”
+/start: Begin your search for similar food orders or transport trips
+User is prompted with "Food" or "Transport" keyboard buttons to choose if they want to order food or travel.
+If user chooses "Food",
+user is prompted with "Start an order" or "Join an order" keyboard buttons.
+If user chooses to "Start an order",
+user is asked to input the following details of their food order.
+a) postal code of the delivery location
+b) restaurant name
+c) Grab group order link
+d) order send-off time, where user is prompted with 4 keyboard buttons in 15 minute intervals from their time of order creation, or user can type their preferred time, as long as it is within 1.5h of order creation.
+
+
+
+
+If user chooses to "Join an order",
+user is asked to input their delivery location. The bot will then show the user orders with delivery locations within 1 km of the user within the same day in the following format:
+Location: <postal code>
+Order started by: @<username of order-starting user>
+Restaurant name:
+Link:
+Order closes at:
+User can then make their decision and join the order using the Grab group order link or contact the order-starting user for further details.
+
+
+
+
+
+If user chooses "Transport",
+user is prompted with "Start a trip" or "Join a trip" keyboard buttons.
+If user chooses to "Start a trip",
+user is asked to input the following details of their transport trip.
+a) pick up postal code
+b) drop off postal code
+c) departure time
+Note: users are only allowed to start transport trips 24h before the scheduled depart time. 
+
+
+
+If user chooses to "Join a trip",
+user is asked to input their pick up and drop off postal codes. The bot will then show the user orders with pick up and drop off postal codes within 1 km of the user's in the following format:
+Pick-up: <Pick-up postal code>
+Drop-off: <Drop-off postal code>
+Departs at:
+Users are only allowed to have a maximum of 1 food order and 1 transport order going on at the same time.
+
+
+
+
+Current issues
+When keying information, any mistakes cannot be corrected immediately. Users can use /start and key in all information again. It is a little troublesome, but it won't take long.
+
+When keying information (i.e. in the middle of order creation, trip creation, order search, trip search), commands will not be recognised.
+
+Software design decisions
+1. User interface: Telegram messaging platform for user interactions and information retrieval.
+2. Natural Language Processing (NLP): Incorporation of NLP techniques to understand user inputs and generate appropriate responses. 
+3. Geolocation services: Integration with Google Maps API for accurate location retrieval and navigation.
+4. Data storage: MySQL database for efficient management and retrieval of user data.
+5. Security: Implementation of secure communication protocols, input validation, and data encryption for user data protection.
+
+Tech stack
+1. Programming language: Python.
+2. NLP: Libraries like NLTK or spaCy for text processing and understanding.
+3. Geolocation and Maps: Google Maps API for location services.
+4. Database: MySQL for data storage and management.
+5. Messaging platform: Integration with Telegram API or custom chatbot platform.
+6. Version control: Github for code versioning and collaboration.
+7. Testing: Automated testing on the Terminal.
+
+A simple overview of the Software Engineering practices used
+1. Modular Design: Code structured
+2. Code reusability: Utilization of functions to encapsulate specific tasks, promoting code reuse.
+3. Error handling: Incorporation of try-except blocks for effective error handling and user feedback.
+4. Input validation: Validating user input to ensure correct format and prevent issues.
+5. Code documentation: Inclusion of comments to enhance code understanding and future maintenance.
+
+
+Documentation of testing
+
+handle_option
+Test case 1: User replies with “abcdef”. 
+Passed: Bot replies with "Invalid reply. Please reply with 'Food' or 'Transport'."
+
+Test case 2: User replies with “123456”. 
+Passed: Bot replies with "Invalid reply. Please reply with 'Food' or 'Transport'."
+
+Test case 3: User replies with “@#^&#$*&”. 
+Passed: Bot replies with "Invalid reply. Please reply with 'Food' or 'Transport'."
+
+Test case 4: User replies with “4gfG7i*((fn”. 
+Passed: Bot replies with "Invalid reply. Please reply with 'Food' or 'Transport'."
+
+Test case 5: User clicks "Food" on the Telegram keyboard.
+Passed: Bot replies with "Food options:" and chat keyboard with "Start" and "Join" appear.
+
+Test case 6: User clicks "Transport" on the chat keyboard.
+Passed: Bot replies with "Transport options:" and chat keyboard with "Start" and "Join" appear.
+
+Test case 7: User types "Food" using regular keyboard.
+Passed: Bot replies with "Food options:" and chat keyboard with "Start" and "Join" appear.
+
+Test case 8: User types "Transport" using regular keyboard.
+Passed: Bot replies with "Transport options:" and chat keyboard with "Start" and "Join" appear.
+
+Similar test cases were used to test the following functions that use the Telegram keyboard:
+confirm_cancel_food
+confirm_cancel _transport
+handle_food_option
+handle_closing
+show_transport _options
+handle_transport_option
+
+
+show_nearby_orders
+Test case 1: User inputs “asdfghhjk”.
+Passed: Bot replies “Invalid postal code. Please try again.”
+
+Test case 2: User inputs “000000”.
+Passed: Bot replies “Invalid postal code. Please try again.”
+
+Test case 3: User inputs “123456”.
+Passed: Bot replies “Invalid postal code. Please try again.”
+
+Test case 4: User inputs “#$^&*#$(%”.
+Passed: Bot replies “Invalid postal code. Please try again.”
+
+Test case 5: User inputs “520149”.
+Passed: Bot replies “Where are you ordering from? Input restaurant name:”.
+
+Similar test cases were used to test the following functions that require users to input a valid postal code:
+process_start_code 
+handle_join_pickup
+show_similar_trips
+handle_pickup
+handle_dropoff
+
+
+handle_closing
+Test case 1: User inputs “asdudso”.
+Passed: Bot replies "Invalid time. Please try again."
+
+Test case 2: User inputs “1245”.
+Passed: Bot replies "Invalid time. Please try again."
+
+Test case 3: User inputs “12:45 pm”
+Passed: Bot replies "Invalid time. Please try again."
+
+Test case 4: User inputs “14:45” at 10:00.
+Passed: Bot replies "Invalid time. Please provide a closing time at most 1.5h from now."
+
+Test case 5: User inputs “11:00” at 10:00.
+Passed: Bot replies "You have selected the closing time as: 11:00”.
+
+Test case 6: User clicks “01:25” option on Telegram keyboard at 00:37.
+Passed: Bot replies "You have selected the closing time as: 01:25”.
+
+Test case 7: User inputs “02:09” at 00:39.
+Passed: Bot replies "You have selected the closing time as: 02:09”.
+
+Test case 8: User inputs “02:10” at 00:39.
+Passed: Bot replies “Invalid time. Please provide a closing time at most 1.5h from now."
+
+
+handle_depart
+Test cases 1 to 3 are similar to test cases 1 to 3 in handle_closing. All passed.
+
+Test case 4: User inputs “12:45” at 00:43 01/07/2023.
+Passed: Bot replies “Departure date: 01/07/2023  Departure time: 12:45”.
+
+Test case 5: User inputs “00:00” at 00:45 01/07/2023.
+Passed: Bot replies “Departure date: 02/07/2023  Departure time: 00:00”.
+
+Test case 6: User inputs “00:45” at 00:45 01/07/2023.
+Passed: Bot replies “Departure date: 02/07/2023  Departure time: 00:45”.
+
+
+process_link
+Test case 1: User inputs “sodifjoajgog”.
+Passed: Bot replies "Invalid link. Please try again."
+
+Test case 2: User inputs “6516s5df8664dsf&*(%f47”.
+Passed: Bot replies "Invalid link. Please try again."
+
+Test case 3: User inputs “google.com”.
+Passed: Bot replies "Invalid link. Please try again."
+
+Test case 4: User inputs “www.google.com”.
+Passed: Bot replies "Invalid link. Please try again."
+
+Test case 5: User inputs “https://www.google.com/”.
+Passed: Bot replies “When do you want to send your order in?”
+
+
+show_closing_time_options
+Test case 1: User is prompted with options at 00:52.
+Passed: Options are 01:00, 01:15, 01:30, and 01:45.
+
+Test case 2: User is prompted with options at 00:54.
+Passed: Options are 01:00, 01:15, 01:30, and 01:45.
+
+Test case 3: User is prompted with options at 01:00.
+Passed: Options are 01:10, 01:25, 01:40, and 01:55.
+
+
+Testing Google Maps API
+Test case 1: User 1 and 2 both start separate food orders at “730644”.
+Passed: When user 3 tries to join order at “730644”, he can see the orders of both user 1 and 2.
+
+Test case 2: User 1 and 2 both start separate food orders at “730644” and “730643”.
+Passed: When user 3 tries to join order at “730645”, he can see the orders of both user 1 and 2.
+
+Test case 3: User 1 starts trip from 730644 to 730644.
+Passed: When user 3 tries to join trip from 730644 to 520149, bot replies with “No similar trips available. Start a trip using /start!”
+
+Test case 4: User 1 starts trip from 520149 to 730644.
+Passed: When user 3 tries to join trip from 730644 to 520149, bot replies with “No similar trips available. Start a trip using /start!”
+
+Test case 5: User 1 starts transport trip from 730644 to 520149. User 2 starts transport trip from 730643 to 520150.
+Passed: When user 3 tries to join trip from 730646 to 520151, he can see the trips of both user 1 and 2.
+
+Test case 6: User 1 starts trip from 117417 to 730644.
+Passed: When user 3 tries to join trip from 520149 to 018956, bot replies with “No similar trips available. Start a trip using /start!”
+
+
