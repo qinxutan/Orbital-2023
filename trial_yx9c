@@ -28,6 +28,7 @@ from telebot import types
 #    1. when Start order
 #    2. when Start trip
 # make function for order summary and trip summary
+# /checkfood and /checktransport
 
 
 # Short forms for ease of documentation, refer to the following:
