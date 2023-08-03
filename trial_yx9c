@@ -1,0 +1,967 @@
+import geopy.distance
+import requests
+import sqlite3
+import telebot
+from datetime import datetime, timedelta
+from telebot import types
+
+# to do:
+# other commands? e.g. /help for bot introduction, /cancelfood, /canceltransport, interesting commands
+# how to deploy bot to a server or hosting platform & necessary steps to ensure bot is always running and available.
+
+
+# done:
+# implement user input format checks (i.e. valid postal code, valid link etc.)
+# hide Chat ID and ID of orders
+# include bot rules (i.e. max 1 food 1 transport, eveyrth ends by 2359) in /help and prompts to users
+# substitute all lists with SQL tables for data retention across code runs
+# ensure users strictly choose food closing time from given choices only, or strictly within 1.5h of starting order
+# implement cancel order or trip
+# before showing trips/orders, delete all rows with any empty columns (i.e. incomplete orders/trips started by users)
+#    Create 2 methods delete_incomplete_food and delete_incomplete_transport
+#     1. before /cancelfood
+#     2. before /canceltransport
+#     3. before showing nearby food
+#     4. before showing nearby trips
+# when user chooses to start an order/trip, the row is first cleared out before any new info
+#    Create clear_food and clear_transport
+#    1. when Start order
+#    2. when Start trip
+# make function for order summary and trip summary
+
+
+# Short forms for ease of documentation, refer to the following:
+# order = food order
+# trip = transport trip
+# postal = postal code
+# location = Location of food order to be delivered to
+# pickup = pickup point of transport trip
+# dropoff = dropoff point of transport trip
+
+
+# Connect to the SQLite database
+conn = sqlite3.connect('user_data.db', check_same_thread=False)
+cursor = conn.cursor()
+
+# Create a table to store food order data
+cursor.execute('''CREATE TABLE IF NOT EXISTS food_data_a
+                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   chat_id INTEGER,
+                   location INTEGER,
+                   leader_name TEXT,
+                   restaurant_name TEXT,
+                   link TEXT,
+                   entry_date TEXT,
+                   delete_time TEXT)''')
+
+# Create a table to store location postal : coord
+# Substitutes location_point dictionary
+cursor.execute('''CREATE TABLE IF NOT EXISTS location_data
+                  (location_postal INTEGER,
+                   location_lat FLOAT,
+                   location_lng FLOAT)''')
+
+# Create a table to store transport trip data
+cursor.execute('''CREATE TABLE IF NOT EXISTS transport_data_a
+                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   chat_id INTEGER,
+                   pickup_code INTEGER,
+                   leader_name TEXT,
+                   dropoff_code INTEGER,
+                   dropoff_name TEXT,
+                   entry_date TEXT,
+                   delete_time TEXT)''')
+
+# Create a table to store pickup postal : coord
+# Substitutes pickup_dict dictionary
+cursor.execute('''CREATE TABLE IF NOT EXISTS pickup_data
+                  (pickup_postal INTEGER,
+                   pickup_lat FLOAT,
+                   pickup_lng FLOAT)''')
+
+# Create a table to store location postal : coord
+# Substitutes dropoff_dict dictionary
+cursor.execute('''CREATE TABLE IF NOT EXISTS dropoff_data
+                  (dropoff_postal INTEGER,
+                   dropoff_lat FLOAT,
+                   dropoff_lng FLOAT)''')
+
+BOT_TOKEN = "6217965722:AAEW6DismZ6EdJDCjiNZqyh034J3fSm-sX0"
+GOOGLE_MAPS_API_KEY = "AIzaSyBdfnEiKhiAVwWyM-EWflBM6NN9wpsNT3Y"
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# Store pickup points and their locations for transport trips
+# To be substituted with an SQL table instead
+# Stored in (postal : coord) format
+pickup_dict = {}
+
+# Store pickup points and their locations for transport trips
+# To be substituted with an SQL table instead
+# Stored in (postal : coord) format
+dropoff_dict = {}
+
+# Store postal codes of transport trips with pickup points within 1 km of joinner's pickup
+nearby_pickup_postals_store = []
+
+# Store location points and their locations for food order
+# Stored in (order postal code : order coordinates) format
+location_points = {}
+
+# If user chooses to join a transport trip,
+# this list of length 2 stores his pick-up and drop-off postal codes
+user_postal_codes = [0, 0]
+
+
+# Temporary sql table manipulation area
+@bot.message_handler(commands=['poo'])
+def send_poo(message):
+    cursor.execute("DROP TABLE IF EXISTS dropoff_data")
+    cursor.execute("DROP TABLE IF EXISTS pickup_data")
+
+    bot.reply_to(message, 'tables dropped')
+
+
+# Handle /help command
+@bot.message_handler(commands=['help'])
+def send_help(message):
+    bot.reply_to(message, "Hi! I'm GrabShare Bot 🤖 My duty is to help you look for Grab food orders and transport "
+                          "orders with similar locations as you. /start to begin!\n\n"
+                          "Note:\n"
+                          "1) Each user can only start one food order and one transport trip at a time.\n"
+                          "2) Transport trips can be scheduled at most 24h in advance.\n\n"
+                          "/start - Start or join a food order or transport trip\n"
+                          "/cancelfood - Cancel ongoing food order\n"
+                          "/canceltransport - Cancel ongoing transport trip")
+
+
+# Handle /start and /hello commands
+@bot.message_handler(commands=['start', 'hello'])
+def send_welcome(message):
+    bot.reply_to(message, "Hi! How can I help you today?")
+    show_options(message.chat.id)
+
+
+# Handle /cancelfood command
+@bot.message_handler(commands=['cancelfood'])
+def cancel_food(message):
+    chat_id = message.chat.id
+    delete_incomplete_food()
+    cursor.execute("SELECT * FROM food_data_a WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    if row is None:
+        bot.send_message(chat_id, "You do not have an ongoing food order at the moment. Start an order using /start!")
+    else:
+        # Confirm whether user wants to delete
+        bot.send_message(chat_id, "You have an ongoing food order.\n\n" +
+                         food_summary(row))
+        bot.send_message(chat_id, "Are you sure you want to cancel your order?")
+        yes_no_keyboard(chat_id)
+        bot.register_next_step_handler(message, confirm_cancel_food)
+    conn.commit()
+
+
+# Confirm food order cancellation
+def confirm_cancel_food(message):
+    option = message.text
+    chat_id = message.chat.id
+    if option == "Yes":
+        # Execute the DELETE statement
+        cursor.execute("DELETE FROM food_data_a WHERE chat_id = ?", (chat_id,))
+        conn.commit()
+        bot.reply_to(message, "Food order successfully cancelled.")
+    elif option == "No":
+        bot.reply_to(message, "Food order has not been cancelled.")
+    else:
+        bot.reply_to(message, "Invalid response. Please answer with 'Yes' or 'No'.")
+        yes_no_keyboard(chat_id)
+        bot.register_next_step_handler(message, confirm_cancel_food)
+
+
+# Handle /canceltransport command
+@bot.message_handler(commands=['canceltransport'])
+def cancel_transport(message):
+    chat_id = message.chat.id
+    delete_incomplete_transport()
+    cursor.execute("SELECT * FROM transport_data_a WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    if row is None:
+        bot.send_message(chat_id,
+                         "You do not have an ongoing transport trip at the moment. Start an order using /start!")
+    else:
+        # Confirm whether user wants to delete
+        bot.send_message(chat_id, "You have an ongoing transport trip.\n\n" +
+                         transport_summary(row))
+        bot.send_message(chat_id, "Are you sure you want to cancel your trip?")
+        yes_no_keyboard(chat_id)
+        bot.register_next_step_handler(message, confirm_cancel_transport)
+    conn.commit()
+
+
+# Confirm cancellation of transport
+def confirm_cancel_transport(message):
+    option = message.text
+    chat_id = message.chat.id
+    if option == "Yes":
+        # Execute the DELETE statement
+        cursor.execute("DELETE FROM transport_data_a WHERE chat_id = ?", (chat_id,))
+        conn.commit()
+        bot.reply_to(message, "Transport trip successfully cancelled.")
+    elif option == "No":
+        bot.reply_to(message, "Transport trip has not been cancelled.")
+    else:
+        bot.reply_to(message, "Invalid response. Please answer with 'Yes' or 'No'.")
+        yes_no_keyboard(chat_id)
+        bot.register_next_step_handler(message, confirm_cancel_transport)
+
+
+# Check ongoing food order
+@bot.message_handler(commands=['checkfood'])
+def check_food(message):
+    chat_id = message.chat.id
+    delete_incomplete_food()
+    cursor.execute("SELECT * FROM food_data_a WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    if row is None:
+        bot.send_message(chat_id, "You do not have an ongoing food order at the moment. Start an order using /start!")
+    else:
+        bot.send_message(chat_id, "You have an ongoing food order.\n\n" +
+                         food_summary(row))
+    conn.commit()
+
+
+@bot.message_handler(commands=['checktransport'])
+def check_transport(message):
+    chat_id = message.chat.id
+    delete_incomplete_transport()
+    cursor.execute("SELECT * FROM transport_data_a WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    if row is None:
+        bot.send_message(chat_id,
+                         "You do not have an ongoing transport trip at the moment. Start an order using /start!")
+    else:
+        # Confirm whether user wants to delete
+        bot.send_message(chat_id, "You have an ongoing transport trip.\n\n" +
+                         transport_summary(row))
+    conn.commit()
+
+
+# Function to delete rows with missing data in food data SQL table
+def delete_incomplete_food():
+    # Execute the DELETE statement
+    cursor.execute("DELETE FROM food_data_a WHERE "
+                   "id IS NULL OR "
+                   "chat_id IS NULL OR "
+                   "location IS NULL OR "
+                   "leader_name IS NULL OR "
+                   "restaurant_name IS NULL OR "
+                   "link IS NULL OR "
+                   "entry_date IS NULL OR "
+                   "delete_time IS NULL")
+    conn.commit
+
+
+# Function to delete rows with missing data in transport data SQL table
+def delete_incomplete_transport():
+    # Execute the DELETE statement
+    cursor.execute("DELETE FROM transport_data_a WHERE "
+                   "id IS NULL OR "
+                   "chat_id IS NULL OR "
+                   "pickup_code IS NULL OR "
+                   "leader_name IS NULL OR "
+                   "dropoff_code IS NULL OR "
+                   "entry_date IS NULL OR "
+                   "delete_time IS NULL")
+    conn.commit
+
+
+# Function that deletes all data from a row in food data when user chooses to start order
+def clear_food(chat_id):
+    cursor.execute("DELETE FROM food_data_a WHERE chat_id = ?", (chat_id,))
+    conn.commit()
+
+
+# Function that deletes all data from a row in transport data when user chooses to start trip
+def clear_transport(chat_id):
+    cursor.execute("DELETE FROM transport_data_a WHERE chat_id = ?", (chat_id,))
+    conn.commit()
+
+
+# User can choose Food or Transport
+def show_options(chat_id):
+    keyboard = types.ReplyKeyboardMarkup(row_width=1)
+    button1 = types.KeyboardButton('Food')
+    button2 = types.KeyboardButton('Transport')
+    keyboard.add(button1, button2)
+
+    bot.send_message(chat_id, 'Please select an option:', reply_markup=keyboard)
+
+
+# User can choose Yes or No
+def yes_no_keyboard(chat_id):
+    keyboard = types.ReplyKeyboardMarkup(row_width=1)
+    button1 = types.KeyboardButton('Yes')
+    button2 = types.KeyboardButton('No')
+    keyboard.add(button1, button2)
+    bot.send_message(chat_id, 'Please select an option:', reply_markup=keyboard)
+
+
+# Handle user's choice of Food or Transport
+@bot.message_handler(func=lambda message: message.text in ['Food', 'Transport'])
+def handle_option(message):
+    option = message.text
+    if option == 'Food':
+        show_food_options(message)
+    elif option == 'Transport':
+        show_transport_options(message)
+    else:
+        bot.send_message(message.chat.id, "Invalid reply. Please reply with 'Food' or 'Transport'.")
+        bot.register_next_step_handler(message, handle_option)
+
+
+# If user chooses Food...
+# User can choose to Start or Join an order
+def show_food_options(message):
+    keyboard = types.ReplyKeyboardMarkup(one_time_keyboard=True)
+    button1 = types.KeyboardButton('Start')
+    button2 = types.KeyboardButton('Join')
+    keyboard.add(button1, button2)
+    bot.send_message(message.chat.id, 'Food options:', reply_markup=keyboard)
+    bot.register_next_step_handler(message, handle_food_option)
+
+
+# If user chooses to Start an order...
+# Prompts user to send Grab group order link
+# @bot.message_handler(func=lambda message: message.text in ['Start an order', 'Join an order'])
+def handle_food_option(message):
+    option = message.text
+    if option == 'Start':
+        bot.send_message(message.chat.id,
+                         'Where will the food be delivered to? Input the delivery postal code: ')
+
+        # Store the chat ID for future reference
+        chat_id = message.chat.id
+
+        # Clear out user's row first
+        clear_food(chat_id)
+
+        cursor.execute("SELECT * FROM food_data_a WHERE chat_id = ?", (chat_id,))
+        data = cursor.fetchone()
+
+        if data is None:
+            cursor.execute("INSERT INTO food_data_a (chat_id) VALUES (?)", (chat_id,))
+            conn.commit()
+
+        # Handle inputted delivery postal code
+        bot.register_next_step_handler(message, process_start_code)
+
+    elif option == 'Join':
+        # Ask user to input postal code
+        bot.send_message(message.chat.id, "Input your postal code and we'll look for nearby orders for you!")
+        bot.register_next_step_handler(message, show_nearby_orders)
+
+
+def show_nearby_orders(message):
+    joinner_location = message.text
+
+    # Use the Google Maps Geocoding API to get the coordinates of the pickup point based on the postal code
+    joinner_coord = get_coordinates(joinner_location)
+
+    if joinner_coord:
+        # Delete all incomplete rows
+        delete_incomplete_food()
+
+        # Execute the SQL query to retrieve all postal codes and coordinates
+        cursor.execute("SELECT location_postal, location_lat, location_lng FROM location_data")
+        result = cursor.fetchall()
+
+        # List to store postal codes within 1 km
+        postal_codes_within_1km = []
+
+        # Iterate over the result set and check the distance for each postal code
+        for row in result:
+            postal_code = row[0]
+            lat = row[1]
+            lng = row[2]
+
+            # Calculate the distance between the given coordinates and current coordinates
+            current_coordinates = (lat, lng)
+            distance = calculate_distance(joinner_coord, current_coordinates)
+
+            # Check if the distance is within 1 km
+            if distance <= 1:
+                postal_codes_within_1km.append(postal_code)
+
+        # Get the current date and time
+        current_date = datetime.now().date()
+        current_time = datetime.now().time()
+
+        # Convert current_date to string format
+        current_date_str = current_date.strftime('%Y-%m-%d')
+        current_time_str = current_time.strftime('%H:%M')
+
+        # Query to retrieve data sets with matching entry date, delete time, and postal code
+        query = "SELECT * FROM food_data_a WHERE entry_date >= ? AND delete_time > ? AND location IN ({})".format(
+            ','.join(['?'] * len(postal_codes_within_1km)))
+
+        # Execute the query and fetch the results
+        cursor.execute(query, (current_date_str, current_time_str) + tuple(postal_codes_within_1km))
+        data = cursor.fetchall()
+
+        if data:
+            response = "Nearby orders found!\n\n"
+            for row in data:
+                # response += f"Order started by: @{row[3]}\n" \
+                #             f"Location: {row[2]}\n" \
+                #             f"Restaurant name: {row[4]}\n" \
+                #             f"Link: {row[5]}\n" \
+                #             f"Order closes on: {row[6]}\n" \
+                #             f"Order closes at: {row[7]}\n\n"
+                response += food_summary(row) + "\n"
+
+            bot.reply_to(message, response)
+        else:
+            bot.reply_to(message, "No orders near you at the moment :( \nStart an order using /start!")
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+        bot.register_next_step_handler(message, show_nearby_orders)
+
+
+# Checks if delivery location postal code is valid
+# Stores delivery location as postal code
+# Retrieves and stores leader username, and entry date
+# Asks user to send restaurant name
+def process_start_code(message):
+    location = message.text
+
+    # Use the Google Maps Geocoding API to get the coordinates of the pickup point based on the postal code
+    coordinates = get_coordinates(location)
+
+    # If postal code is valid, begin storing order data
+    if coordinates:
+        location_int = int(message.text)
+        # location_points[location_int] = coordinates
+        location_lat = coordinates[0]
+        location_lng = coordinates[1]
+
+        # Store the chat ID for future reference
+        chat_id = message.chat.id
+
+        # Retrieve leader's Telegram handle
+        leader_name = message.from_user.username
+
+        # Update the delivery location, leader name, and entry date in the food database
+        cursor.execute("SELECT * FROM food_data_a WHERE chat_id = ?", (chat_id,))
+        data = cursor.fetchone()
+        entry_date = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute("UPDATE food_data_a SET location = ?, leader_name = ?, entry_date = ? WHERE id = ?",
+                       (location, leader_name, entry_date, data[0]))
+
+        # Update the location database with the location's postal, lat, lng
+        cursor.execute("SELECT * FROM location_data WHERE location_postal = ?", (location_int,))
+        data = cursor.fetchone()
+
+        if data is None:
+            cursor.execute("INSERT INTO location_data (location_postal, location_lat, location_lng) VALUES (?, ?, ?)",
+                           (location_int, location_lat, location_lng))
+
+        # Save changes
+        conn.commit()
+
+        # Next step: Ask user for restaurant name
+        bot.send_message(message.chat.id, 'Where are you ordering from? Input restaurant name:')
+        bot.register_next_step_handler(message, process_restaurant_name)
+
+    # If postal code is invalid, user is asked to try again
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+        bot.register_next_step_handler(message, process_start_code)
+
+
+# Stores restaurant name
+# Asks user to send group order link
+def process_restaurant_name(message):
+    restaurant_name = message.text
+
+    # Store the chat ID for future reference
+    chat_id = message.chat.id
+
+    # Fetch the existing user entry
+    cursor.execute("SELECT * FROM food_data_a WHERE chat_id = ?", (chat_id,))
+    data = cursor.fetchone()
+
+    # Update the group order link in the database
+    cursor.execute("UPDATE food_data_a SET restaurant_name = ? WHERE id = ?", (restaurant_name, data[0]))
+    conn.commit()
+
+    # Ask user to send group order link
+    bot.send_message(message.chat.id, 'Send us your Group order link!')
+    bot.register_next_step_handler(message, process_link)
+
+
+# Helper function for process_link
+# Checks if a link is valid
+def is_valid_link(link):
+    try:
+        response = requests.get(link)
+        return response.status_code == 200
+    except:
+        return False
+
+
+# Stores group order link
+# Asks user for order closing time
+def process_link(message):
+    link = message.text
+
+    # Check the response status code
+    if is_valid_link(link):
+        # Store the chat ID for future reference
+        chat_id = message.chat.id
+
+        # Fetch the existing user entry
+        cursor.execute("SELECT * FROM food_data_a WHERE chat_id = ?", (chat_id,))
+        data = cursor.fetchone()
+
+        # Update the group order link in the database
+        cursor.execute("UPDATE food_data_a SET link = ? WHERE id = ?", (link, data[0]))
+        conn.commit()
+
+        bot.send_message(message.chat.id, 'When do you want to send your order in?')
+        show_closing_time_options(message)
+    else:
+        bot.send_message(message.chat.id, "Invalid link. Please try again.")
+        bot.register_next_step_handler(message, process_link)
+
+
+# round_time is a helper function for show_closing_time_options
+# helps to round up times to the nearest 10 min for readability
+def round_time(time):
+    current_minute = time.minute
+    to_add_minute = 10 - (current_minute % 10)
+    return to_add_minute
+
+
+# allows users 4 choices of order closing times
+# rounds current time up to the nearest 10 min
+# then, provides 4 timings in 15 min intervals from the rounded time
+def show_closing_time_options(message):
+    # Get the current time
+    current_time = datetime.now()
+
+    # Create the reply markup
+    markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
+
+    # Generate four buttons with 15-minute intervals rounded up to the nearest multiple of 5
+    for i in range(4):
+        button_time = current_time + timedelta(minutes=15 * i + round_time(current_time))
+        button_text = button_time.strftime('%H:%M')
+        button = types.KeyboardButton(button_text)
+        markup.add(button)
+
+    # Send the message with the keyboard
+    bot.send_message(message.chat.id, 'Choose a closing time:', reply_markup=markup)
+    bot.register_next_step_handler(message, handle_closing)
+
+
+# Handler for handling user input
+# @bot.message_handler(func=lambda message: is_valid_time(message.text))
+def handle_closing(message):
+    # Process the selected time
+    closing_time = message.text
+
+    if is_valid_time(closing_time):
+
+        # Convert the closing time string to a datetime object
+        closing_time_time = datetime.strptime(closing_time, "%H:%M").time()
+
+        # Get the current date and time
+        current_date = datetime.now().date()
+        current_time = datetime.now().time()
+        # Get the current date and time
+        current_datetime = datetime.now()
+
+        # Calculate the maximum allowed time
+        max_closing_time = current_datetime + timedelta(hours=1.5)
+
+        # Extract the time component from max_closing_time
+        max_closing_time_time = max_closing_time.time()
+
+        # Assume closing_time_time is a datetime.time object
+        closing = datetime.combine(current_datetime.date(), closing_time_time)
+
+        # Compare closing_time with max_closing_time
+        if current_datetime <= closing <= max_closing_time:
+            # Fetch the existing user entry
+            cursor.execute("SELECT * FROM food_data_a WHERE chat_id = ?", (message.chat.id,))
+            data = cursor.fetchone()
+
+            # Update the closing time in the database
+            cursor.execute("UPDATE food_data_a SET delete_time = ? WHERE id = ?", (closing_time, data[0]))
+
+            # Get tomorrow's date
+            next_date = current_date + timedelta(days=1)
+
+            if closing_time_time < current_time:
+                cursor.execute("UPDATE food_data_a SET entry_date = ? WHERE id = ?", (next_date, data[0]))
+
+            conn.commit()
+
+            # Send the user a summary of the order they started
+            bot.reply_to(message, f"You have selected the closing time as: {closing_time}")
+            food_confirm(message)
+        else:
+            bot.reply_to(message, "Invalid time. Please provide a closing time at most 1.5h from now.")
+            bot.register_next_step_handler(message, handle_closing)
+    else:
+        bot.reply_to(message, "Invalid time. Please try again.")
+        bot.register_next_step_handler(message, handle_closing)
+
+
+# Send user the summary of their food order for confirmation
+def food_confirm(message):
+    # Fetch the existing user entry
+    cursor.execute("SELECT * FROM food_data_a WHERE chat_id = ?", (message.chat.id,))
+    row = cursor.fetchone()
+    bot.send_message(message.chat.id, food_summary(row) + "\n" +
+                     'If any of the above information is wrong, please re-key your order using /start.')
+
+
+# Function that takes in an SQL row and prints its details
+def food_summary(row):
+    # Show order summary
+    response = f"Order started by: @{row[3]}\n" \
+               f"Location: {row[2]}\n" \
+               f"Restaurant name: {row[4]}\n" \
+               f"Link: {row[5]}\n" \
+               f"Order closes on: {row[6]}\n" \
+               f"Order closes at: {row[7]}\n"
+    return response
+
+
+# Function to check if the value is a valid time in HH:MM format
+def is_valid_time(value):
+    try:
+        datetime.strptime(value, "%H:%M")
+        return True
+    except ValueError:
+        return False
+
+
+# If user chooses Transport...
+# Bot will recommend journeys with pickup and drop-off within 1km radius
+# Prompts user to input pickup and drop-off postal codes
+def show_transport_options(message):
+    keyboard = types.ReplyKeyboardMarkup(one_time_keyboard=True)
+    button1 = types.KeyboardButton('Start')
+    button2 = types.KeyboardButton('Join')
+    keyboard.add(button1, button2)
+    bot.send_message(message.chat.id, 'Transport options:', reply_markup=keyboard)
+    bot.register_next_step_handler(message, handle_transport_option)
+
+
+# @bot.message_handler(func=lambda message: message.text in ['Start a trip', 'Join a trip'])
+def handle_transport_option(message):
+    option = message.text
+    if option == 'Start':
+        bot.send_message(message.chat.id, 'Input postal code of pick-up point:')
+
+        # Store the chat ID for future reference
+        chat_id = message.chat.id
+
+        # Clear out user's row first
+        clear_transport(chat_id)
+
+        cursor.execute("SELECT * FROM transport_data_a WHERE chat_id = ?", (chat_id,))
+        data = cursor.fetchone()
+
+        if data is None:
+            cursor.execute("INSERT INTO transport_data_a (chat_id) VALUES (?)", (chat_id,))
+            conn.commit()
+
+        # Handle inputted delivery postal code
+        bot.register_next_step_handler(message, handle_pickup)
+
+    elif option == 'Join':
+        # Ask user to input pick-up postal code
+        bot.send_message(message.chat.id, "Input your pick-up postal code: ")
+        bot.register_next_step_handler(message, handle_join_pickup)
+
+
+def handle_join_pickup(message):
+    joinner_pickup_postal = message.text
+
+    # Use the Google Maps Geocoding API to get the coordinates of the pickup point based on the postal code
+    coordinates = get_coordinates(joinner_pickup_postal)
+
+    if coordinates:
+        joinner_pickup_postal_int = int(message.text)
+        user_postal_codes[0] = joinner_pickup_postal
+        bot.send_message(message.chat.id, "Input your drop-off postal code: ")
+        bot.register_next_step_handler(message, show_similar_trips)
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+        bot.register_next_step_handler(message, handle_join_pickup)
+
+
+def show_similar_trips(message):
+    joinner_dropoff_postal = message.text
+    joinner_dropoff_postal_int = int(message.text)
+    user_postal_codes[1] = joinner_dropoff_postal
+
+    # Use the Google Maps Geocoding API to get the coordinates of the pickup point based on the postal code
+    joinner_pickup_coords = get_coordinates(user_postal_codes[0])
+    joinner_dropoff_coords = get_coordinates(user_postal_codes[1])
+
+    if joinner_dropoff_coords:
+        # Delete all incomplete rows
+        delete_incomplete_transport()
+
+        # Retrieve postal codes of ongoing orders with pickup within 1km of joinner pickup
+        # Execute the SQL query to retrieve all postal codes and coordinates
+        cursor.execute("SELECT pickup_postal, pickup_lat, pickup_lng FROM pickup_data")
+        result = cursor.fetchall()
+
+        # List to store pickup postal codes within 1 km
+        pickup_postals_within_1km = []
+
+        # Iterate over the result set and check the distance for each postal code
+        for row in result:
+            postal_code = row[0]
+            lat = row[1]
+            lng = row[2]
+
+            # Calculate the distance between the given coordinates and current coordinates
+            current_coordinates = (lat, lng)
+            distance = calculate_distance(joinner_pickup_coords, current_coordinates)
+
+            # Check if the distance is within 1 km
+            if distance <= 1:
+                pickup_postals_within_1km.append(postal_code)
+
+        # Retrieve postal codes of ongoing orders with dropoff within 1km of joinner dropoff
+        # Execute the SQL query to retrieve all postal codes and coordinates
+        cursor.execute("SELECT dropoff_postal, dropoff_lat, dropoff_lng FROM dropoff_data")
+        result = cursor.fetchall()
+
+        # Create list to store all postal codes of ongoing orders that are within 1km from joinner location
+        dropoff_postals_within_1km = []
+
+        # Iterate over the result set and check the distance for each postal code
+        for row in result:
+            postal_code = row[0]
+            lat = row[1]
+            lng = row[2]
+
+            # Calculate the distance between the given coordinates and current coordinates
+            current_coordinates = (lat, lng)
+            distance = calculate_distance(joinner_dropoff_coords, current_coordinates)
+
+            # Check if the distance is within 1 km
+            if distance <= 1:
+                dropoff_postals_within_1km.append(postal_code)
+
+        # Get the current date and time
+        current_date = datetime.now().date()
+        current_time = datetime.now().time()
+
+        # Convert current_date to string format
+        current_date_str = current_date.strftime('%Y-%m-%d')
+        current_time_str = current_time.strftime('%H:%M')
+
+        query = "SELECT * FROM transport_data_a WHERE entry_date = ? AND delete_time > ? " \
+                "AND dropoff_code IN ({}) AND pickup_code IN ({})" \
+            .format(','.join(['?'] * len(dropoff_postals_within_1km)), ','.join(['?'] * len(pickup_postals_within_1km)))
+
+        # Combine the nearby_postals lists for the parameter values
+        params = (current_date_str, current_time_str) + tuple(dropoff_postals_within_1km) + tuple(
+            pickup_postals_within_1km)
+
+        # Execute the query and fetch the results
+        cursor.execute(query, params)
+        data = cursor.fetchall()
+
+        if data:
+            response = "Similar trips found!\n\n"
+            for row in data:
+                response += transport_summary(row) + "\n"
+            bot.reply_to(message, response)
+        else:
+            bot.reply_to(message, "No similar trips available. Start a trip using /start!")
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+        bot.register_next_step_handler(message, show_similar_trips)
+
+
+def handle_pickup(message):
+    pickup_code = message.text
+
+    # Use the Google Maps Geocoding API to get the coordinates of the pickup point based on the postal code
+    pickup_coord = get_coordinates(pickup_code)
+
+    if pickup_coord:
+        pickup_code_int = int(message.text)
+        # pickup_dict[pickup_code_int] = pickup_coord
+        pickup_lat = pickup_coord[0]
+        pickup_lng = pickup_coord[1]
+
+        # Store the chat ID for future reference
+        chat_id = message.chat.id
+
+        # Retrieve leader's Telegram handle
+        leader_name = message.from_user.username
+
+        # Fetch the existing user entry
+        cursor.execute("SELECT * FROM transport_data_a WHERE chat_id = ?", (message.chat.id,))
+        data = cursor.fetchone()
+
+        # Update the closing time in the database
+        entry_date = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute("UPDATE transport_data_a SET pickup_code = ?, leader_name = ?, entry_date = ? WHERE id = ?",
+                       (pickup_code_int, leader_name, entry_date, data[0]))
+
+        # Update the location database with the pickup's postal, lat, lng
+        cursor.execute("SELECT * FROM pickup_data WHERE pickup_postal = ?", (pickup_code_int,))
+        data = cursor.fetchone()
+
+        if data is None:
+            cursor.execute("INSERT INTO pickup_data (pickup_postal, pickup_lat, pickup_lng) VALUES (?, ?, ?)",
+                           (pickup_code_int, pickup_lat, pickup_lng))
+        conn.commit()
+
+        # Tell user pick-up point has been registered
+        bot.reply_to(message, 'Pick-up confirmed: ' + pickup_code)
+
+        # Ask user for drop-off point postal code
+        bot.send_message(message.chat.id, 'Input postal code of drop-off point:')
+        bot.register_next_step_handler(message, handle_dropoff)
+
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+        bot.register_next_step_handler(message, handle_pickup)
+
+
+def handle_dropoff(message):
+    dropoff_code = message.text
+
+    # Store the chat ID for future reference
+    chat_id = message.chat.id
+
+    # Use the Google Maps Geocoding API to get the coordinates of the drop-off point based on the postal code
+    dropoff_coord = get_coordinates(dropoff_code)
+
+    if dropoff_coord:
+        dropoff_code_int = int(message.text)
+        dropoff_lat = dropoff_coord[0]
+        dropoff_lng = dropoff_coord[1]
+
+        # Fetch the existing user entry
+        cursor.execute("SELECT * FROM transport_data_a WHERE chat_id = ?", (message.chat.id,))
+        data = cursor.fetchone()
+
+        # Update the closing time in the database
+        cursor.execute("UPDATE transport_data_a SET dropoff_code = ? WHERE id = ?",
+                       (dropoff_code_int, data[0]))
+
+        # Update the location database with the pickup's postal, lat, lng
+        cursor.execute("SELECT * FROM dropoff_data WHERE dropoff_postal = ?", (dropoff_code_int,))
+        data = cursor.fetchone()
+
+        if data is None:
+            cursor.execute("INSERT INTO dropoff_data (dropoff_postal, dropoff_lat, dropoff_lng) VALUES (?, ?, ?)",
+                           (dropoff_code_int, dropoff_lat, dropoff_lng))
+        conn.commit()
+
+        # Tell user drop-off point has been registered
+        bot.send_message(message.chat.id, 'Drop-off confirmed: ' + message.text)
+
+        # Send the user a summary of the trip they started
+        bot.send_message(message.chat.id, "When are you departing? (e.g. 14:10)\n\n" +
+                         "Note: Trips can only be created a maximum of 24 hours in advance.")
+        bot.register_next_step_handler(message, handle_depart)
+    else:
+        bot.send_message(message.chat.id, 'Invalid postal code. Please try again.')
+        bot.register_next_step_handler(message, handle_dropoff)
+
+
+# Store departure time
+def handle_depart(message):
+    # Get the current date and time
+    current_date = datetime.now().date()
+    current_time = datetime.now().time()
+
+    # Process the selected time
+    depart_time = message.text
+
+    if is_valid_time(depart_time):
+        # Convert the closing time string to a datetime object
+        depart_time_time = datetime.strptime(depart_time, "%H:%M").time()
+        depart_date = current_date
+
+        # Fetch the existing user entry
+        cursor.execute("SELECT * FROM transport_data_a WHERE chat_id = ?", (message.chat.id,))
+        data = cursor.fetchone()
+
+        # Update the closing time in the database
+        cursor.execute("UPDATE transport_data_a SET delete_time = ? WHERE id = ?", (depart_time, data[0]))
+        if depart_time_time < current_time:
+            # Get tomorrow's date
+            next_date = current_date + timedelta(days=1)
+            cursor.execute("UPDATE food_data_a SET entry_date = ? WHERE id = ?", (next_date, data[0]))
+            depart_date = next_date
+
+        conn.commit()
+
+        # Send the user a summary of the order they started
+        bot.reply_to(message, f"Departure date: {depart_date}\n"
+                              f"Departure time: {depart_time}")
+        transport_confirm(message)
+    else:
+        bot.reply_to(message, "Invalid time. Please try again.")
+        bot.register_next_step_handler(message, handle_depart)
+
+
+# Send user the summary of their transport trip for confirmation
+def transport_confirm(message):
+    # Fetch the existing user entry
+    cursor.execute("SELECT * FROM transport_data_a WHERE chat_id = ?", (message.chat.id,))
+    row = cursor.fetchone()
+    bot.send_message(message.chat.id, transport_summary(row) + "\n" +
+                     'If any of the above information is wrong, please re-key your order using /start.')
+
+
+# Function that takes in an SQL row and prints its details
+def transport_summary(row):
+    # Show order summary
+    response = f"Trip started by: @{row[3]}\n" \
+               f"Pick-up: {row[2]}\n" \
+               f"Drop-off: {row[4]}\n" \
+               f"Entry date: {row[6]}\n" \
+               f"Departs at: {row[7]}\n"
+    return response
+
+
+# Calculate distance between two coordinates using geodesic distance
+def calculate_distance(coord1, coord2):
+    return geopy.distance.geodesic(coord1, coord2).kilometers
+
+
+# Get coordinates based on postal code using Google Maps Geocoding API
+def get_coordinates(postal_code):
+    url = f'https://maps.googleapis.com/maps/api/geocode/json?address={postal_code}&key={GOOGLE_MAPS_API_KEY}'
+
+    response = requests.get(url)
+    data = response.json()
+
+    if data['status'] == 'OK':
+        results = data['results']
+        if len(results) > 0:
+            location = results[0]['geometry']['location']
+            lat = location['lat']
+            lng = location['lng']
+            return (lat, lng)
+
+    return None
+
+
+bot.polling()
