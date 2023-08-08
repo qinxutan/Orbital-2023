@@ -122,6 +122,16 @@ def send_poo(message):
     bot.reply_to(message, 'tables dropped')
 
 
+# Define your command handler function
+@bot.message_handler(commands=['exit'])
+def exit(message):
+    user_id = message.from_user.id
+    # Clear any user-specific data or context
+    # Your code to clear context here
+
+    bot.reply_to(message, "Process terminated. /start to start a new order/trip!")
+
+
 # Handle /help command
 @bot.message_handler(commands=['help'])
 def send_help(message):
@@ -129,16 +139,21 @@ def send_help(message):
                           "orders with similar locations as you. /start to begin!\n\n"
                           "Note:\n"
                           "1) Each user can only start one food order and one transport trip at a time.\n"
-                          "2) Transport trips can be scheduled at most 24h in advance.\n\n"
+                          "2) Food orders can be scheduled at most 1.5h in advance.\n"
+                          "3) Transport trips can be scheduled at most 24h in advance.\n\n"
                           "/start - Start or join a food order or transport trip\n"
-                          "/cancelfood - Cancel ongoing food order\n"
-                          "/canceltransport - Cancel ongoing transport trip")
+                          "/cancelfood - Cancel your ongoing food order\n"
+                          "/canceltransport - Cancel your ongoing transport trip\n"
+                          "/checkfood - Check your ongoing food order\n"
+                          "/checktransport - Check your ongoing transport trip\n"
+                          "/exit - Exit from any start/join process if you change your mind\n")
 
 
 # Handle /start and /hello commands
 @bot.message_handler(commands=['start', 'hello'])
 def send_welcome(message):
-    bot.reply_to(message, "Hi! How can I help you today?")
+    bot.reply_to(message, "Hi! How can I help you today?\n"
+                          "/help for more helpful commands and information on GrabShare bot.")
     show_options(message.chat.id)
 
 
@@ -359,6 +374,9 @@ def handle_food_option(message):
         # Ask user to input postal code
         bot.send_message(message.chat.id, "Input your postal code and we'll look for nearby orders for you!")
         bot.register_next_step_handler(message, show_nearby_orders)
+    else:
+        bot.send_message(message.chat.id, "Invalid reply. Please reply with 'Start' or 'Join'.")
+        bot.register_next_step_handler(message, handle_food_option)
 
 
 def show_nearby_orders(message):
