@@ -1,0 +1,166 @@
+https://docs.google.com/document/d/14OmqZh1Xa-H8X_uPF6QqnXC5n_nVMU-njodus3thuk8/edit?usp=sharing
+
+GrabShare Bot - Grab delivery and fare splitting bot (Gemini)
+
+
+Motivation
+After 1 year of studying and staying in NUS, I find myself wishing for 3 main things: better grades, faster transport, and cheaper food. With a way to split the costs of transport and food delivery, we can solve the latter 2 problems easily. Students will find their commutes and meals to be much more enjoyable and affordable (sorry cant help u with ur grades lol).
+
+Many NUS students need to get to and from school every day, or order food, but cannot afford the luxury of Grab. GrabShare bot aims to allow NUS students to connect with others with similar food or ride locations to split the delivery and transport fares.
+
+
+Features
+Telegram bot
+Start,
+Join,
+Cancel OR
+Check your order/trip
+
+MySQL database to store and handle order/trip details
+
+Google Maps API to help users search for nearby order/trip
+
+Users can start orders up to 1.5 hours before send-off time, and trips up to 24 hours before departure. Users are also limited to 1 ongoing order and 1 ongoing trip to prevent clutter.
+
+
+Design
+Telegram bots are known for being streamlined and easily navigable, like Quizarium and Zoom bot. We aim to make user experience as streamlined and guided as possible so users will not be deterred by difficulties in interaction with the bot interface. 
+
+The general flow of the bot is as such:
+
+Food
+
+(i) Start an order
+Users will be prompted to input order details as follows.
+Postal code -> Restaurant name -> Grab group order link -> Order send-off time (max 1.5h in advance)
+
+The user’s order details will be stored in the MySQL database.
+
+
+
+
+(ii) Join an order
+Users will be prompted to input their postal code. The bot will then use MySQL to retrieve and reply with a list of ongoing nearby orders (1km radius).
+
+
+Transport
+(iii) Start a trip
+Users will be prompted to input trip details as follows.
+Pick-up postal code -> Drop-off postal code -> Departure time (max 24h in advance)
+
+
+
+
+(iv) Join a trip
+Users will be prompted to input their Pick-up postal code and Drop-off postal code. The bot replies with a list of trips with drop-off and pick-up within 1km radius of the user’s.
+
+Cancel food/trip
+Users can use /cancelfood or /canceltransport to cancel their ongoing order/trip, if any. This function retrieves their order/trip information by querying from the database and deletes the data.
+
+Check food/trip
+Users can use /checkfood or /checktransport to check their ongoing order/trip, if any. This function retrieves their order/trip information by querying from the database and presenting it to them.
+
+
+Tech stack
+1. Programming language: Python.
+3. Geolocation and Maps: Google Maps API for location services.
+4. Database: MySQL for data storage and management.
+5. Messaging platform: Integration with Telegram API or custom chatbot platform.
+6. Version control: Github for code versioning and collaboration.
+
+
+Software design decisions
+1. User interface: Telegram messaging platform for user interactions and information retrieval.
+3. Geolocation services: Integration with Google Maps API for accurate location retrieval and navigation.
+4. Data storage: MySQL database for efficient management and retrieval of user data.
+5. Security: Implementation of secure communication protocols, input validation, and data encryption for user data protection.
+
+
+Software Engineering practices
+1. Modular Design: Code structured
+2. Code reusability: Utilization of functions to encapsulate specific tasks, promoting code reuse.
+3. Error handling: Incorporation of try-except blocks for effective error handling and user feedback.
+4. Input validation: Validating user input to ensure correct format and prevent issues.
+5. Code documentation: Inclusion of comments to enhance code understanding and future maintenance.
+
+
+Design for testing
+
+Start food order 
+A food order with valid information inputs is registered and stored in the database.
+Start a food order and answer all questions
+Use /checkfood
+Expected outcome: Bot replies with user’s food order details accurately
+
+Start transport trip
+A transport trip with valid information inputs is registered and stored in the database.
+Start a transport trip and answer all questions
+Use /checktransport
+Expected outcome: Bot replies with user’s transport trip details accurately
+
+Cancel order/trip
+/cancelfood cancels user’s ongoing food/transport, if any
+Start an order
+Use /checkfood
+Use /cancelfood
+Use /checkfood
+Expected outcome: bot replies with order details at (b), but not at (d)
+Repeat (a) to (d) with transport to test /canceltransport
+
+Check order/trip
+/checkfood checks user’s ongoing food/transport, if any
+Start an order
+Use /checkfood
+Use /cancelfood
+Use /checkfood
+Expected outcome: bot replies with order details at (b), but not at (d)
+Repeat (a) to (d) with transport to test /checktransport
+
+Buttons
+Each button should lead the bot to perform the correct function. 
+Click on each keyboard button
+Observe for bot replies
+Expected outcome: Bot replies correctly and relevant functions are run
+
+Start order -> closing time & date
+Users are allowed to answer with timestamps max 1.5h from current time.
+Start food order
+At closing time prompt, reply with time 1.5h from now
+Use /checkfood
+Expected outcome 1: If current time is 1100, closing time is 1.5h from now, and date is today
+Expected outcome 2: if current time is 2300, closing time is 1.5h from now, and date is tomorrow
+
+Start order -> closing time keyboard options
+Closing time keyboard options range from current time rounded up to nearest 10-min, till 1h later, in 15-min intervals
+Start order 
+Note current time and provided closing time options
+Expected outcome: closing time keyboard options range from current time rounded up to nearest 10-min, till 1h later, in 15-min intervals
+
+Start trip departure time & date
+Users are allowed to answer with timestamps max 24h from current time
+Start transport trip
+At departure time prompt, reply with a time later today
+Use /checktransport
+Expected outcome: departure date is registered as today
+Start transport trip
+At departure time prompt, reply with a time earlier today
+Use /checktransport
+Expected outcome: departure date is registered as tomorrow
+
+Postal code validity via Google Maps API
+Users are not allowed to key invalid postal codes
+Start an order/trip
+At postal code prompt, key anything
+Expected outcome: any input other than a valid postal code is rejected
+
+1km radius calculation accuracy (Food)
+Users can see all food orders up to 1km away from their location
+Join an order
+Expected outcome: bot replies with a list of orders within 1-km radius of user’s inputted postal code
+
+1km radius calculation accuracy (Transport)
+Users can see all transport trips up to 1km away from their location
+Join a trip
+Expected outcome: bot replies with a list of trips with 
+pick-up within 1-km of user’s inputted pick-up postal code
+Drop-off within 1-km of user’s inputted drop-off postal code
